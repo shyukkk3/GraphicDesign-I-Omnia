@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Visual Iron Bars & Fading Matrix Fluid</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: hsl(0, 0%, 94%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            transition: background-color 0.1s; 
+        }
+        
+        #light-beam {
+            position: absolute;
+            top: calc(50vh - 192.5px); 
+            left: 50%;
+            width: 3000px;
+            height: 100vh;
+            transform: translateX(-50%);
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 80%);
+            clip-path: polygon(1150px 0, 1850px 0, 3000px 100%, 0 100%);
+            z-index: 0;
+            pointer-events: none;
+            opacity: 1; 
+        }
+
+        #canvas-container {
+            width: 720px;
+            height: 405px;
+            background-color: transparent;
+            position: relative;
+            cursor: crosshair;
+            z-index: 1; 
+        }
+        
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+<div id="light-beam"></div>
+<div id="canvas-container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script>
+    const Engine = Matter.Engine,
+          Render = Matter.Render,
+          Runner = Matter.Runner,
+          Bodies = Matter.Bodies,
+          Composite = Matter.Composite,
+          Events = Matter.Events,
+          Vector = Matter.Vector,
+          Body = Matter.Body;
+
+    const engine = Engine.create({
+        positionIterations: 4, 
+        velocityIterations: 3  
+    });
+    const world = engine.world;
+    engine.gravity.y = 0.4; 
+
+    const PI2 = Math.PI * 2;
+    const SQRT3 = Math.sqrt(3);
+
+    const container = document.getElementById('canvas-container');
+    const lightBeam = document.getElementById('light-beam');
+    
+    const render = Render.create({
+        element: container,
+        engine: engine,
+        options: {
+            width: 720,  
+            height: 405, 
+            wireframes: false,
+            background: 'transparent'
+        }
+    });
+
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    let currentLightness = 94;
+    const borderThickness = 10; 
+    let clickCount = 0;
+    const MAX_CLICKS = 60; 
+
+    function createPhysicalBorders() {
+        const existingWalls = Composite.allBodies(world).filter(b => b.isStatic && b.label === 'border');
+        if (existingWalls.length > 0) Composite.remove(world, existingWalls);
+
+        const wallOptions = {
+            isStatic: true,
+            label: 'border',
+            render: { visible: false } 
+        };
+
+        Composite.add(world, [
+            Bodies.rectangle(-40, 450 / 2, borderThickness, 450, wallOptions), 
+            Bodies.rectangle(760, 450 / 2, borderThickness, 450, wallOptions), 
+            Bodies.rectangle(360, 450 - borderThickness / 2, 800, borderThickness, wallOptions) 
+        ]);
+    }
+
+    const particles = [];
+    const particleCount = 2000; 
+    
+    for (let i = 0; i < particleCount; i++) {
+        const x = Math.random() * 600 + 60;
+        const y = Math.random() * 200 + borderThickness;
+        
+        const particle = Bodies.circle(x, y, 5, { 
+            restitution: 0.3,
+            friction: 0.01,
+            density: 0.06,
+            label: 'particle',
+            render: { visible: false }
+        });
+        
+        particle.hue = Math.random() * 360;
+        particle.vRadius = Math.random() * 3.5 + 4.5; 
+        
+        particles.push(particle);
+    }
+    Composite.add(world, particles);
+
+    createPhysicalBorders();
+
+    let matrixSparks = [];
+
+    // 💡 오류 수정됨: 사방으로 터져나가는 가속도(vx, vy)가 온전히 적용된 매트릭스 효과
+    function spawnMatrixEffect(x, y, capabilityRatio = 1) { 
+        // 초반엔 최대 80개에서 점차 한 자릿수로 감소
+        const numSparks = Math.floor(80 * capabilityRatio) + 5; 
+
+        for (let i = 0; i < numSparks; i++) {
+            const angle = Math.random() * PI2;
+            
+            // 퍼져나가는 속도(폭발력)도 능력에 비례하여 약해짐
+            const speed = Math.random() * (5 * capabilityRatio) + 2; 
+
+            matrixSparks.push({
+                x: x, 
+                y: y,
+                vx: Math.cos(angle) * speed,  // 💡 누락되었던 X축 가속도 복구
+                vy: Math.sin(angle) * speed - (3 * capabilityRatio), // Y축 가속도 (위로 솟구침)
+                char: Math.random() > 0.5 ? '0' : '1',
+                life: 1.0, 
+                decay: (Math.random() * 0.02 + 0.01) + (0.04 * (1 - capabilityRatio)), 
+                fontSize: Math.floor(Math.random() * 12 * capabilityRatio) + 8 
+            });
+        }
+    }
+
+    function getCapabilityRatio() {
+        return Math.max(0.2, Math.pow(0.97, clickCount));
+    }
+
+    function getCapabilityTargetLightness() {
+        return Math.max(10, 94 * Math.pow(0.9, clickCount));
+    }
+
+    Events.on(engine, 'beforeUpdate', function(event) {
+        engine.gravity.x = Math.sin(event.timestamp * 0.0015) * 0.15;
+
+        const targetLightness = getCapabilityTargetLightness();
+        currentLightness += (targetLightness - currentLightness) * 0.05;
+        
+        document.body.style.backgroundColor = `hsl(0, 0%, ${currentLightness}%)`;
+        lightBeam.style.opacity = Math.max(0, (currentLightness - 10) / 84);
+    });
+
+    Events.on(render, 'afterRender', function() {
+        const context = render.context;
+
+        // 1. 파티클 렌더링
+        particles.forEach(p => {
+            if (p.position.y < -1200 || p.position.y > 900 || p.position.x < -300 || p.position.x > 1000) {
+                Body.setPosition(p, { 
+                    x: 360 + (Math.random() - 0.5) * 500, 
+                    y: -100 
+                });
+                Body.setVelocity(p, { x: 0, y: 0 });
+            }
+
+            p.hue += 1.5; 
+            if (p.hue > 360) p.hue = 0;
+
+            context.beginPath();
+            context.arc(p.position.x, p.position.y, p.vRadius, 0, PI2); 
+            context.fillStyle = `hsl(${Math.floor(p.hue)}, 60%, 80%)`;
+            context.fill();
+        });
+
+        // 2. 매트릭스 이펙트 렌더링
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        for (let i = matrixSparks.length - 1; i >= 0; i--) {
+            let spark = matrixSparks[i];
+            
+            // 💡 여기서 vx, vy를 통해 위치가 계산됨 (오류 해결)
+            spark.x += spark.vx;
+            spark.y += spark.vy; 
+            
+            spark.vx *= 0.90; // 마찰력 (좌우로 퍼지다 느려짐)
+            spark.vy += 0.25; // 중력 (아래로 떨어짐)
+            
+            spark.life -= spark.decay; 
+
+            if (Math.random() < 0.1) spark.char = spark.char === '0' ? '1' : '0';
+
+            if (spark.life <= 0) {
+                matrixSparks.splice(i, 1);
+                continue;
+            }
+
+            context.font = `bold ${spark.fontSize}px monospace`;
+            context.fillStyle = `rgba(0, 255, 65, ${spark.life})`; 
+            context.fillText(spark.char, spark.x, spark.y);
+        }
+
+        // 3. 시각적 오버레이
+        const frameColor = `hsl(0, 0%, ${currentLightness}%)`; 
+        context.fillStyle = frameColor;
+        context.strokeStyle = `hsl(0, 0%, ${Math.max(0, currentLightness - 5)}%)`; 
+        context.lineWidth = 1;
+        
+        context.fillRect(0, 0, borderThickness, 405); 
+        context.fillRect(720 - borderThickness, 0, borderThickness, 405); 
+        context.fillRect(0, 0, 720, borderThickness); 
+        context.fillRect(0, 405 - borderThickness, 720, borderThickness); 
+
+        context.strokeRect(borderThickness / 2, borderThickness / 2, 720 - borderThickness, 405 - borderThickness);
+
+        const numBars = clickCount;
+        if (numBars > 0) {
+            const currentBarThickness = Math.max(2, 16 * Math.pow(0.9925, clickCount - 1));
+            const availableWidth = 720 - (borderThickness * 2);
+            const paneWidth = (availableWidth - (numBars * currentBarThickness)) / (numBars + 1);
+
+            for (let i = 1; i <= numBars; i++) {
+                const x = borderThickness + (paneWidth * i) + (currentBarThickness * (i - 1));
+                context.fillRect(x, borderThickness, currentBarThickness, 405 - (borderThickness * 2));
+                context.strokeRect(x, borderThickness, currentBarThickness, 405 - (borderThickness * 2));
+            }
+        }
+    });
+
+    function createExplosion(x, y, forceMultiplier = 1) {
+        const blastRadius = 180 * forceMultiplier; 
+        const shapeType = Math.floor(Math.random() * 3); 
+        const sqR = blastRadius * 0.85; 
+        const triR = blastRadius * 1.5;
+        const blastRadiusSq = blastRadius * blastRadius;
+
+        particles.forEach(p => {
+            const dx = p.position.x - x;
+            const dy = p.position.y - y;
+            let isInside = false;
+
+            if (shapeType === 0) {
+                isInside = (dx * dx + dy * dy) < blastRadiusSq;
+            } else if (shapeType === 1) {
+                isInside = Math.abs(dx) < sqR && Math.abs(dy) < sqR;
+            } else if (shapeType === 2) {
+                isInside = dy < triR / 2 && dy > Math.abs(dx) * SQRT3 - triR;
+            }
+
+            if (isInside) {
+                const distSq = dx * dx + dy * dy;
+                const distance = Math.max(1, Math.sqrt(distSq)); 
+                const forceDirection = { x: dx / distance, y: dy / distance };
+                
+                const forceMagnitude = (blastRadius * 1.5 - distance) * 0.0015;
+                const force = { x: forceDirection.x * forceMagnitude, y: forceDirection.y * forceMagnitude };
+                
+                Body.applyForce(p, p.position, force);
+            }
+        });
+    }
+
+    container.addEventListener('click', function(e) {
+        if (clickCount >= MAX_CLICKS) return; 
+
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top; 
+        
+        const capabilityRatio = getCapabilityRatio();
+        
+        createExplosion(mouseX, mouseY, capabilityRatio);
+        spawnMatrixEffect(mouseX, mouseY, capabilityRatio); 
+        
+        clickCount++;
+    });
+
+    function triggerRandomEruption() {
+        const randomX = Math.random() * 720; 
+        const randomY = 440; 
+        const randomSize = Math.random() * 0.15 + 0.2; 
+        
+        createExplosion(randomX, randomY, randomSize);
+
+        const nextDelay = Math.random() * 1000 + 500;
+        setTimeout(triggerRandomEruption, nextDelay);
+    }
+    setTimeout(triggerRandomEruption, 1000);
+</script>
+</body>
+</html>
