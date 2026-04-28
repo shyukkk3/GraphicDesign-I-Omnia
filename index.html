@@ -65,7 +65,7 @@
         velocityIterations: 3  
     });
     const world = engine.world;
-    engine.gravity.y = 0.4; 
+    engine.gravity.y = 0.13; 
 
     const PI2 = Math.PI * 2;
     const SQRT3 = Math.sqrt(3);
@@ -111,7 +111,7 @@
     }
 
     const particles = [];
-    const particleCount = 2000; 
+    const particleCount = 1800; 
     
     for (let i = 0; i < particleCount; i++) {
         const x = Math.random() * 600 + 60;
